@@ -344,9 +344,9 @@ namespace msfastbuild
 				PrecompiledHeaderString = InPrecompiledHeaderString;
 			}
 		
-			public bool AddIfMatches(string InputFile, string InCompiler, string InCompilerOutputPath, string InCompilerOptions, string InPrecompiledHeaderString)
+			public bool AddIfMatches(string InputFile, string InCompiler, string InCompilerOutputPath, string InCompilerOptions, string InPrecompiledHeaderString, string InCompilerOutputExtension = "")
 			{
-				if(Compiler == InCompiler && CompilerOutputPath == InCompilerOutputPath && CompilerOptions == InCompilerOptions && PrecompiledHeaderString == InPrecompiledHeaderString)
+				if(Compiler == InCompiler && CompilerOutputPath == InCompilerOutputPath && CompilerOptions == InCompilerOptions && PrecompiledHeaderString == InPrecompiledHeaderString && CompilerOutputExtension == InCompilerOutputExtension)
 				{
 					CompilerInputFiles.Add(InputFile);
 					return true;
@@ -586,11 +586,23 @@ namespace msfastbuild
 				else
 					TempCompilerOptions += " /TP";
 				CompilerOptions = TempCompilerOptions;
+				string outDir = IntDir;
+				string outExt = "";
+				if (Item.DirectMetadataCount > 0)
+				{
+					ProjectMetadata element = Item.DirectMetadata.ElementAt(0);
+					if (element.Name == "ObjectFileName")
+					{
+						outDir = Path.GetDirectoryName(element.EvaluatedValue);
+						string name = Path.GetFileName(element.EvaluatedValue);
+						outExt = name.Substring(name.IndexOf("."));
+					}
+				}
 				string FormattedCompilerOptions = string.Format("\"%1\" /Fo\"%2\" {0}", TempCompilerOptions);
-				var MatchingNodes = ObjectLists.Where(el => el.AddIfMatches(Item.EvaluatedInclude, "msvc", IntDir, FormattedCompilerOptions, ExcludePrecompiledHeader ? "" : PrecompiledHeaderString));
+				var MatchingNodes = ObjectLists.Where(el => el.AddIfMatches(Item.EvaluatedInclude, "msvc", outDir, FormattedCompilerOptions, ExcludePrecompiledHeader ? "" : PrecompiledHeaderString, outExt));
 				if(!MatchingNodes.Any())
 				{
-					ObjectLists.Add(new ObjectListNode(Item.EvaluatedInclude, "msvc", IntDir, FormattedCompilerOptions, ExcludePrecompiledHeader ? "" : PrecompiledHeaderString));
+					ObjectLists.Add(new ObjectListNode(Item.EvaluatedInclude, "msvc", outDir, FormattedCompilerOptions, ExcludePrecompiledHeader ? "" : PrecompiledHeaderString, outExt));
 				}
 			}
 
