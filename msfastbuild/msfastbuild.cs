@@ -113,21 +113,42 @@ namespace msfastbuild
 			{
 				try
 				{
+					List<ProjectInSolution> solutionProjects = SolutionFile.Parse(Path.GetFullPath(CommandLineOptions.Solution)).ProjectsInOrder.Where(el => el.ProjectType == SolutionProjectType.KnownToBeMSBuildFormat).ToList();
+					List<ProjectInSolution> relatedProjects = new List<ProjectInSolution>();
 					if (string.IsNullOrEmpty(CommandLineOptions.Project))
 					{
-						List<ProjectInSolution> SolutionProjects = SolutionFile.Parse(Path.GetFullPath(CommandLineOptions.Solution)).ProjectsInOrder.Where(el => el.ProjectType == SolutionProjectType.KnownToBeMSBuildFormat).ToList();
-						SolutionProjects.Sort((x, y) => //Very dubious sort.
-						{
-							if (x.Dependencies.Contains(y.ProjectGuid)) return 1;
-							if (y.Dependencies.Contains(x.ProjectGuid)) return -1;
-							return 0;
-						});
-						ProjectsToBuild = SolutionProjects.ConvertAll(el => el.AbsolutePath);
+						relatedProjects = solutionProjects;
 					}
 					else
 					{
-						ProjectsToBuild.Add(Path.GetFullPath(CommandLineOptions.Project));
+						ProjectInSolution project = solutionProjects.First(proj => Path.GetFileName(proj.AbsolutePath) == CommandLineOptions.Project);
+						if (project != null)
+						relatedProjects.Add(project);
+						for (int i = 0; i < relatedProjects.Count; ++i)
+						{
+							foreach (var guid in relatedProjects[i].Dependencies)
+							{
+								project = solutionProjects.First(proj => proj.ProjectGuid == guid);
+								if (project != null && !relatedProjects.Contains(project))
+									relatedProjects.Add(project);
+							}
+						}
 					}
+
+					List<ProjectInSolution> sortedProjects = new List<ProjectInSolution>();
+					Dictionary<string, List<string>> dependedProjects = new Dictionary<string, List<string>>();
+					foreach (var project in relatedProjects)
+						dependedProjects[project.ProjectGuid] = new List<string>(project.Dependencies);
+					while (dependedProjects.Count > 0)
+					{
+						var item = dependedProjects.First(pair => pair.Value.Count == 0);
+						ProjectInSolution project = solutionProjects.First(proj => proj.ProjectGuid == item.Key);
+						dependedProjects.Remove(item.Key);
+						sortedProjects.Add(project);
+						foreach (var depends in dependedProjects.Values)
+							depends.Remove(project.ProjectGuid);
+					}
+					ProjectsToBuild = sortedProjects.ConvertAll(el => el.AbsolutePath);
 
 					SolutionDir = Path.GetDirectoryName(Path.GetFullPath(CommandLineOptions.Solution));
 					SolutionDir = SolutionDir.Replace(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
