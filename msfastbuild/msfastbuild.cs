@@ -38,6 +38,10 @@ namespace msfastbuild
 		HelpText = "Arguments that pass through to FASTBuild.")]
 		public string FBArgs { get; set; }
 
+		[Option('b', "brokerage", DefaultValue = "",
+		HelpText = "FASTBUILD_BROKERAGE_PATH for distributed compilation")]
+		public string Brokerage { get; set; }
+
 		[Option('g', "generateonly", DefaultValue = false,
 		HelpText = "Generate bff file only, without calling FASTBuild.")]
 		public bool GenerateOnly { get; set; }
@@ -46,9 +50,9 @@ namespace msfastbuild
 		HelpText = "Regenerate bff file even when the project hasn't changed.")]
 		public bool AlwaysRegenerate { get; set; }
 
-		[Option('b', "fbpath", DefaultValue = @"FBuild.exe",
+		[Option('e', "fbexepath", DefaultValue = @"FBuild.exe",
 		HelpText = "Path to FASTBuild executable.")]
-		public string FBPath { get; set; }
+		public string FBExePath { get; set; }
 
 		[Option('u', "unity", DefaultValue = false,
 		HelpText = "Whether to combine files into a unity step. May substantially improve compilation time, but not all projects are suitable.")]
@@ -306,9 +310,10 @@ namespace msfastbuild
 			string projectDir = Path.GetDirectoryName(ProjectPath) + "\\";
 
 			string BatchFileText = "@echo off\n"
+				+ (CommandLineOptions.Brokerage.Length > 0 ? "set FASTBUILD_BROKERAGE_PATH=" + CommandLineOptions.Brokerage + "\n" : "")
 				+ "%comspec% /c \"\"" + VCBasePath + "Auxiliary\\Build\\vcvarsall.bat\" "
 				+ (Platform == "Win32" ? "x86" : "x64") + " " + WindowsSDKTarget
-				+ " && \"" + CommandLineOptions.FBPath  +"\" %*\"";
+				+ " && \"" + CommandLineOptions.FBExePath  +"\" %*\"";
 
 		#if NULL_FASTBUILD_OUTPUT
 			BatchFileText += " > nul";
