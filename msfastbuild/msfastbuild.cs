@@ -38,6 +38,10 @@ namespace msfastbuild
 		HelpText = "Arguments that pass through to FASTBuild.")]
 		public string FBArgs { get; set; }
 
+		[Option('b', "brokerage", DefaultValue = "",
+		HelpText = "FASTBUILD_BROKERAGE_PATH for distributed compilation")]
+		public string Brokerage { get; set; }
+
 		[Option('g', "generateonly", DefaultValue = false,
 		HelpText = "Generate bff file only, without calling FASTBuild.")]
 		public bool GenerateOnly { get; set; }
@@ -46,9 +50,9 @@ namespace msfastbuild
 		HelpText = "Regenerate bff file even when the project hasn't changed.")]
 		public bool AlwaysRegenerate { get; set; }
 
-		[Option('b', "fbpath", DefaultValue = @"FBuild.exe",
+		[Option('e', "fbexepath", DefaultValue = @"FBuild.exe",
 		HelpText = "Path to FASTBuild executable.")]
-		public string FBPath { get; set; }
+		public string FBExePath { get; set; }
 
 		[Option('u', "unity", DefaultValue = false,
 		HelpText = "Whether to combine files into a unity step. May substantially improve compilation time, but not all projects are suitable.")]
@@ -117,21 +121,42 @@ namespace msfastbuild
 			{
 				try
 				{
+					List<ProjectInSolution> solutionProjects = SolutionFile.Parse(Path.GetFullPath(CommandLineOptions.Solution)).ProjectsInOrder.Where(el => el.ProjectType == SolutionProjectType.KnownToBeMSBuildFormat).ToList();
+					List<ProjectInSolution> relatedProjects = new List<ProjectInSolution>();
 					if (string.IsNullOrEmpty(CommandLineOptions.Project))
 					{
-						List<ProjectInSolution> SolutionProjects = SolutionFile.Parse(Path.GetFullPath(CommandLineOptions.Solution)).ProjectsInOrder.Where(el => el.ProjectType == SolutionProjectType.KnownToBeMSBuildFormat).ToList();
-						SolutionProjects.Sort((x, y) => //Very dubious sort.
-						{
-							if (x.Dependencies.Contains(y.ProjectGuid)) return 1;
-							if (y.Dependencies.Contains(x.ProjectGuid)) return -1;
-							return 0;
-						});
-						ProjectsToBuild = SolutionProjects.ConvertAll(el => el.AbsolutePath);
+						relatedProjects = solutionProjects;
 					}
 					else
 					{
-						ProjectsToBuild.Add(Path.GetFullPath(CommandLineOptions.Project));
+						ProjectInSolution project = solutionProjects.First(proj => Path.GetFileName(proj.AbsolutePath) == CommandLineOptions.Project);
+						if (project != null)
+						relatedProjects.Add(project);
+						for (int i = 0; i < relatedProjects.Count; ++i)
+						{
+							foreach (var guid in relatedProjects[i].Dependencies)
+							{
+								project = solutionProjects.First(proj => proj.ProjectGuid == guid);
+								if (project != null && !relatedProjects.Contains(project))
+									relatedProjects.Add(project);
+							}
+						}
 					}
+
+					List<ProjectInSolution> sortedProjects = new List<ProjectInSolution>();
+					Dictionary<string, List<string>> dependedProjects = new Dictionary<string, List<string>>();
+					foreach (var project in relatedProjects)
+						dependedProjects[project.ProjectGuid] = new List<string>(project.Dependencies);
+					while (dependedProjects.Count > 0)
+					{
+						var item = dependedProjects.First(pair => pair.Value.Count == 0);
+						ProjectInSolution project = solutionProjects.First(proj => proj.ProjectGuid == item.Key);
+						dependedProjects.Remove(item.Key);
+						sortedProjects.Add(project);
+						foreach (var depends in dependedProjects.Values)
+							depends.Remove(project.ProjectGuid);
+					}
+					ProjectsToBuild = sortedProjects.ConvertAll(el => el.AbsolutePath);
 
 					SolutionDir = Path.GetDirectoryName(Path.GetFullPath(CommandLineOptions.Solution));
 					SolutionDir = SolutionDir.Replace(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
@@ -289,9 +314,10 @@ namespace msfastbuild
 			string projectDir = Path.GetDirectoryName(ProjectPath) + "\\";
 
 			string BatchFileText = "@echo off\n"
+				+ (CommandLineOptions.Brokerage.Length > 0 ? "set FASTBUILD_BROKERAGE_PATH=" + CommandLineOptions.Brokerage + "\n" : "")
 				+ "%comspec% /c \"\"" + VCBasePath + "Auxiliary\\Build\\vcvarsall.bat\" "
 				+ (Platform == "Win32" ? "x86" : "x64") + " " + WindowsSDKTarget
-				+ " && \"" + CommandLineOptions.FBPath  +"\" %*\"";
+				+ " && \"" + CommandLineOptions.FBExePath  +"\" %*\"";
 
 			if (CommandLineOptions.QuietMode)
 			{
@@ -349,9 +375,9 @@ namespace msfastbuild
 				PrecompiledHeaderString = InPrecompiledHeaderString;
 			}
 		
-			public bool AddIfMatches(string InputFile, string InCompiler, string InCompilerOutputPath, string InCompilerOptions, string InPrecompiledHeaderString)
+			public bool AddIfMatches(string InputFile, string InCompiler, string InCompilerOutputPath, string InCompilerOptions, string InPrecompiledHeaderString, string InCompilerOutputExtension = "")
 			{
-				if(Compiler == InCompiler && CompilerOutputPath == InCompilerOutputPath && CompilerOptions == InCompilerOptions && PrecompiledHeaderString == InPrecompiledHeaderString)
+				if(Compiler == InCompiler && CompilerOutputPath == InCompilerOutputPath && CompilerOptions == InCompilerOptions && PrecompiledHeaderString == InPrecompiledHeaderString && CompilerOutputExtension == InCompilerOutputExtension)
 				{
 					CompilerInputFiles.Add(InputFile);
 					return true;
@@ -591,11 +617,23 @@ namespace msfastbuild
 				else
 					TempCompilerOptions += " /TP";
 				CompilerOptions = TempCompilerOptions;
+				string outDir = IntDir;
+				string outExt = "";
+				if (Item.DirectMetadataCount > 0)
+				{
+					ProjectMetadata element = Item.DirectMetadata.ElementAt(0);
+					if (element.Name == "ObjectFileName")
+					{
+						outDir = Path.GetDirectoryName(element.EvaluatedValue);
+						string name = Path.GetFileName(element.EvaluatedValue);
+						outExt = name.Substring(name.IndexOf("."));
+					}
+				}
 				string FormattedCompilerOptions = string.Format("\"%1\" /Fo\"%2\" {0}", TempCompilerOptions);
-				var MatchingNodes = ObjectLists.Where(el => el.AddIfMatches(Item.EvaluatedInclude, "msvc", IntDir, FormattedCompilerOptions, ExcludePrecompiledHeader ? "" : PrecompiledHeaderString));
+				var MatchingNodes = ObjectLists.Where(el => el.AddIfMatches(Item.EvaluatedInclude, "msvc", outDir, FormattedCompilerOptions, ExcludePrecompiledHeader ? "" : PrecompiledHeaderString, outExt));
 				if(!MatchingNodes.Any())
 				{
-					ObjectLists.Add(new ObjectListNode(Item.EvaluatedInclude, "msvc", IntDir, FormattedCompilerOptions, ExcludePrecompiledHeader ? "" : PrecompiledHeaderString));
+					ObjectLists.Add(new ObjectListNode(Item.EvaluatedInclude, "msvc", outDir, FormattedCompilerOptions, ExcludePrecompiledHeader ? "" : PrecompiledHeaderString, outExt));
 				}
 			}
 
