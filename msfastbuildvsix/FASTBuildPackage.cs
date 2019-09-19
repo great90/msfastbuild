@@ -16,6 +16,7 @@ namespace msfastbuildvsix
 	{
 		private string FBArgs = "-dist -ide -monitor";
 		private string FBPath = "FBuild.exe";
+		private string Brokerage = "";
 		private bool FBUnity = false;
 
 		[Category("Options")]
@@ -34,6 +35,15 @@ namespace msfastbuildvsix
 		{
 			get { return FBPath; }
 			set { FBPath = value; }
+		}
+
+		[Category("Options")]
+		[DisplayName("Brokerage")]
+		[Description("Brokerage folder for distributed compilation")]
+		public string OptionBrokerage
+		{
+			get { return Brokerage; }
+			set { Brokerage = value; }
 		}
 
 		[Category("Options")]
@@ -88,6 +98,15 @@ namespace msfastbuildvsix
 			{
 				OptionPageGrid page = (OptionPageGrid)GetDialogPage(typeof(OptionPageGrid));
 				return page.OptionFBPath;
+			}
+		}
+
+		public string OptionBrokerage
+		{
+			get
+			{
+				OptionPageGrid page = (OptionPageGrid)GetDialogPage(typeof(OptionPageGrid));
+				return page.OptionBrokerage;
 			}
 		}
 

@@ -107,7 +107,7 @@ namespace msfastbuildvsix
 		{
 			string fbuild = "fbuild.exe";
 
-			if (FBuildExePath != fbuild)
+			if (FBuildExePath.ToLower() != fbuild)
 			{
 				return File.Exists(FBuildExePath);
 			}
@@ -203,15 +203,19 @@ namespace msfastbuildvsix
 				}
 
 				fbPackage.m_outputPane.OutputString("Building " + Path.GetFileName(proj.ProjectFile) + " " + sc.Name + " " + sc.PlatformName + "\r");
-				fbCommandLine = string.Format("-p \"{0}\" -c {1} -f {2} -s \"{3}\" -a\"{4}\" -b \"{5}\"", Path.GetFileName(proj.ProjectFile), sc.Name, sc.PlatformName, sln.FileName, fbPackage.OptionFBArgs, fbPackage.OptionFBPath);
+				fbCommandLine = string.Format("-p \"{0}\" -c {1} -f {2} -s \"{3}\" -a\"{4}\" -e \"{5}\"", Path.GetFileName(proj.ProjectFile), sc.Name, sc.PlatformName, sln.FileName, fbPackage.OptionFBArgs, fbPackage.OptionFBPath);
 				fbWorkingDirectory = Path.GetDirectoryName(proj.ProjectFile);
 			}
 			else
 			{
-				fbCommandLine = string.Format("-s \"{0}\" -c {1} -f {2} -a\"{3}\" -b \"{4}\"", sln.FileName, sc.Name, sc.PlatformName, fbPackage.OptionFBArgs, fbPackage.OptionFBPath);
+				fbCommandLine = string.Format("-s \"{0}\" -c {1} -f {2} -a\"{3}\" -e \"{4}\"", sln.FileName, sc.Name, sc.PlatformName, fbPackage.OptionFBArgs, fbPackage.OptionFBPath);
 				fbWorkingDirectory = Path.GetDirectoryName(sln.FileName);
 			}
 
+			if (fbPackage.OptionBrokerage.Length > 0)
+			{
+				fbCommandLine += " -b " + fbPackage.OptionBrokerage;
+			}
 			if(fbPackage.OptionFBUnity)
 			{
 				fbCommandLine += " -u true";
