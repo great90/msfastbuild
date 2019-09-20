@@ -324,6 +324,19 @@ namespace msfastbuild
 				BatchFileText += " > nul";
 			}
 
+			var Proj = CurrentProject.Proj;
+			List<string> properties = new List<string>(){ "TargetFrameworkVersion", "PlatformToolSet", "EnableManagedIncrementalBuild", "VCToolArchitecture", "WindowsTargetPlatformVersion" };
+			string line = "#";
+			foreach (var name in properties)
+				line += name + "=" + Proj.GetProperty(name).EvaluatedValue + ":";
+			if (line.EndsWith(":"))
+				line = line.Substring(0, line.Length - 1);
+			string projectName = Proj.GetProperty("ProjectName").EvaluatedValue;
+			string tlogPath = Proj.GetProperty("IntDir").EvaluatedValue + projectName + ".tlog";
+			BatchFileText += string.Format("\n\n@if not exist {0} mkdir {0}\n@echo {1}>{2}\n@echo on>>{2}\n@echo {3}^|{4}^|{5}^|>>{2}",
+				tlogPath, line, Path.Combine(tlogPath, projectName + ".lastbuildstate"),
+				CommandLineOptions.Config, CommandLineOptions.Platform, Path.GetDirectoryName(CommandLineOptions.Solution) + "\\");
+
 			File.WriteAllText(projectDir + "fb.bat", BatchFileText);
 
 			Console.WriteLine("Building " + Path.GetFileNameWithoutExtension(ProjectPath));
