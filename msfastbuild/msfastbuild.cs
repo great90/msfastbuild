@@ -127,7 +127,7 @@ namespace msfastbuild
 					{
 						ProjectInSolution project = solutionProjects.First(proj => Path.GetFileName(proj.AbsolutePath) == CommandLineOptions.Project);
 						if (project != null)
-						relatedProjects.Add(project);
+							relatedProjects.Add(project);
 						for (int i = 0; i < relatedProjects.Count; ++i)
 						{
 							foreach (var guid in relatedProjects[i].Dependencies)
@@ -314,6 +314,19 @@ namespace msfastbuild
 				+ "%comspec% /c \"\"" + VCBasePath + "Auxiliary\\Build\\vcvarsall.bat\" "
 				+ (Platform == "Win32" ? "x86" : "x64") + " " + WindowsSDKTarget
 				+ " && \"" + CommandLineOptions.FBExePath  +"\" %*\"";
+
+			var Proj = CurrentProject.Proj;
+			List<string> properties = new List<string>(){ "TargetFrameworkVersion", "PlatformToolSet", "EnableManagedIncrementalBuild", "VCToolArchitecture", "WindowsTargetPlatformVersion" };
+			string line = "#";
+			foreach (var name in properties)
+				line += name + "=" + Proj.GetProperty(name).EvaluatedValue + ":";
+			if (line.EndsWith(":"))
+				line = line.Substring(0, line.Length - 1);
+			string projectName = Proj.GetProperty("ProjectName").EvaluatedValue;
+			string tlogPath = Proj.GetProperty("IntDir").EvaluatedValue + projectName + ".tlog";
+			BatchFileText += string.Format("\n\n@if not exist {0} mkdir {0}\n@echo {1}>{2}\n@echo on>>{2}\n@echo {3}^|{4}^|{5}^|>>{2}",
+				tlogPath, line, Path.Combine(tlogPath, projectName + ".lastbuildstate"),
+				CommandLineOptions.Config, CommandLineOptions.Platform, Path.GetDirectoryName(CommandLineOptions.Solution) + "\\");
 
 		#if NULL_FASTBUILD_OUTPUT
 			BatchFileText += " > nul";
