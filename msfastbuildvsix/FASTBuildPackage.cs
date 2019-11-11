@@ -18,6 +18,7 @@ namespace msfastbuildvsix
 		private string FBPath = "FBuild.exe";
 		private string Brokerage = "";
 		private bool FBUnity = false;
+		private uint MaxProcess = 1;
 
 		[Category("Options")]
 		[DisplayName("FASTBuild arguments")]
@@ -54,9 +55,18 @@ namespace msfastbuildvsix
 			get { return FBUnity; }
 			set { FBUnity = value; }
 		}
+
+		[Category("Options")]
+		[DisplayName("Max Work Process")]
+		[Description("Specify the max work process to execute fastbuild.")]
+		public uint OptionMaxProcess
+		{
+			get { return MaxProcess; }
+			set { MaxProcess = value; }
+		}
 	}
 
-	[PackageRegistration(UseManagedResourcesOnly = true)]
+    [PackageRegistration(UseManagedResourcesOnly = true)]
 	[InstalledProductRegistration("#110", "#112", "1.0", IconResourceID = 400)] // Info on this package for Help/About
 	[ProvideMenuResource("Menus.ctmenu", 1)]
 	[Guid(FASTBuildPackage.PackageGuidString)]
@@ -119,13 +129,22 @@ namespace msfastbuildvsix
 			}
 		}
 
+		public uint OptionMaxProcess
+		{
+			get
+			{
+				OptionPageGrid page = (OptionPageGrid)GetDialogPage(typeof(OptionPageGrid));
+				return page.OptionMaxProcess;
+			}
+		}
+
 		#region Package Members
 
-		/// <summary>
-		/// Initialization of the package; this method is called right after the package is sited, so this is the place
-		/// where you can put all the initialization code that rely on services provided by VisualStudio.
-		/// </summary>
-		protected override void Initialize()
+        /// <summary>
+        /// Initialization of the package; this method is called right after the package is sited, so this is the place
+        /// where you can put all the initialization code that rely on services provided by VisualStudio.
+        /// </summary>
+        protected override void Initialize()
 		{
 			FASTBuild.Initialize(this);
 			base.Initialize();

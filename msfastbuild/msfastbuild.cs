@@ -3,6 +3,7 @@
 // Available under an MIT license. See license file on github for details.
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
 using CommandLine;
 using CommandLine.Text;
@@ -57,6 +58,10 @@ namespace msfastbuild
 		[Option('u', "unity", DefaultValue = false,
 		HelpText = "Whether to combine files into a unity step. May substantially improve compilation time, but not all projects are suitable.")]
 		public bool UseUnity { get; set; }
+
+		[Option('m', "maxprocess", DefaultValue = 1u,
+		HelpText = "Max process to executable FASTBuild.")]
+		public uint MaxProcess { get; set; }
 
 		[HelpOption]
 		public string GetUsage()
@@ -179,6 +184,7 @@ namespace msfastbuild
 			}
 
 			int ProjectsBuilt = 0;
+			List<MSFBProject> needBuildProjects = new List<MSFBProject>();
 			foreach(MSFBProject project in EvaluatedProjects)
 			{
 				CurrentProject = project;
@@ -218,17 +224,70 @@ namespace msfastbuild
 
 				if (!CommandLineOptions.GenerateOnly)
 				{
-					if (HasCompileActions && !ExecuteBffFile(CurrentProject.Proj.FullPath, CommandLineOptions.Platform))
+					if (HasCompileActions)
+						needBuildProjects.Add(CurrentProject);
+                    /*if (HasCompileActions && !ExecuteBffFile(CurrentProject.Proj.FullPath, CommandLineOptions.Platform))
 						break;
 					else
-						ProjectsBuilt++;
-				}
+						ProjectsBuilt++;*/
+                }
 			}
 
-			Console.WriteLine(ProjectsBuilt + "/" + EvaluatedProjects.Count + " built.");
+			List<Process> runningProcesses = new List<Process>();
+			uint maxProcess = Math.Max(CommandLineOptions.MaxProcess, 1);
+			while (needBuildProjects.Count > 0 || runningProcesses.Count > 0)
+			{
+				if (needBuildProjects.Count > 0 && runningProcesses.Count < maxProcess)
+				{
+					var project = needBuildProjects[0];
+					needBuildProjects.RemoveAt(0);
+					var process = GenWorkProcess(project.Proj.FullPath, CommandLineOptions.Platform);
+					try
+					{
+						process.Start();
+						runningProcesses.Add(process);
+					}
+					catch (Exception e)
+					{
+						Console.WriteLine("Failed to launch FASTBuild!");
+						Console.WriteLine("Exception: " + e.Message);
+						break;
+					}
+                }
+
+				var itor = runningProcesses.GetEnumerator();
+				if (itor.MoveNext())
+				{
+					var process = itor.Current;
+                    if (!process.StandardOutput.EndOfStream)
+					{
+						Console.Write("[" + process.Id + "] " + process.StandardOutput.ReadLine() + "\n");
+					}
+					else
+					{
+						process.WaitForExit();
+						runningProcesses.Remove(process);
+						if (process.ExitCode == 0)
+						{
+							ProjectsBuilt++;
+						}
+                    }
+                }
+			}
+			Console.Write(ProjectsBuilt + "/" + EvaluatedProjects.Count + " built.");
+			if (needBuildProjects.Count > 0)
+			{
+				Console.WriteLine("");
+				Console.Write("Unbuild projects: ");
+				foreach (var project in needBuildProjects)
+				{
+					Console.WriteLine("\t" + project.Proj.FullPath);
+				}
+			}
+			Console.WriteLine("");
 		}
 
-		static public void EvaluateProjectReferences(string ProjectPath, List<MSFBProject> evaluatedProjects, MSFBProject dependent)
+		public static void EvaluateProjectReferences(string ProjectPath, List<MSFBProject> evaluatedProjects, MSFBProject dependent)
 		{
 			if (!string.IsNullOrEmpty(ProjectPath) && File.Exists(ProjectPath))
 			{
@@ -285,7 +344,7 @@ namespace msfastbuild
 			}
 		}
 
-		static public bool HasFileChanged(string InputFile, string Platform, string Config, out string MD5hash)
+		public static bool HasFileChanged(string InputFile, string Platform, string Config, out string MD5hash)
 		{
 			using (var md5 = System.Security.Cryptography.MD5.Create())
 			{
@@ -305,64 +364,107 @@ namespace msfastbuild
 				return true;
 		}
 
-		static public bool ExecuteBffFile(string ProjectPath, string Platform)
-		{
-			string projectDir = Path.GetDirectoryName(ProjectPath) + "\\";
+        public static Process GenWorkProcess(string ProjectPath, string Platform)
+        {
+            string projectDir = Path.GetDirectoryName(ProjectPath) + "\\";
 
-			string BatchFileText = "@echo off\n"
-				+ (CommandLineOptions.Brokerage.Length > 0 ? "set FASTBUILD_BROKERAGE_PATH=" + CommandLineOptions.Brokerage + "\n" : "")
-				+ "%comspec% /c \"\"" + VCBasePath + "Auxiliary\\Build\\vcvarsall.bat\" "
-				+ (Platform == "Win32" ? "x86" : "x64") + " " + WindowsSDKTarget
-				+ " && \"" + CommandLineOptions.FBExePath  +"\" %*\"";
+            string BatchFileText = "@echo off\n"
+                + (CommandLineOptions.Brokerage.Length > 0 ? "set FASTBUILD_BROKERAGE_PATH=" + CommandLineOptions.Brokerage + "\n" : "")
+                + "%comspec% /c \"\"" + VCBasePath + "Auxiliary\\Build\\vcvarsall.bat\" "
+                + (Platform == "Win32" ? "x86" : "x64") + " " + WindowsSDKTarget
+                + " && \"" + CommandLineOptions.FBExePath + "\" %*\"";
 
-			var Proj = CurrentProject.Proj;
-			List<string> properties = new List<string>(){ "TargetFrameworkVersion", "PlatformToolSet", "EnableManagedIncrementalBuild", "VCToolArchitecture", "WindowsTargetPlatformVersion" };
-			string line = "#";
-			foreach (var name in properties)
-				line += name + "=" + Proj.GetProperty(name).EvaluatedValue + ":";
-			if (line.EndsWith(":"))
-				line = line.Substring(0, line.Length - 1);
-			string projectName = Proj.GetProperty("ProjectName").EvaluatedValue;
-			string tlogPath = Proj.GetProperty("IntDir").EvaluatedValue + projectName + ".tlog";
-			BatchFileText += string.Format("\n\n@if not exist {0} mkdir {0}\n@echo {1}>{2}\n@echo on>>{2}\n@echo {3}^|{4}^|{5}^|>>{2}",
-				tlogPath, line, Path.Combine(tlogPath, projectName + ".lastbuildstate"),
-				CommandLineOptions.Config, CommandLineOptions.Platform, Path.GetDirectoryName(CommandLineOptions.Solution) + "\\");
-
-		#if NULL_FASTBUILD_OUTPUT
+            var Proj = CurrentProject.Proj;
+            List<string> properties = new List<string>() { "TargetFrameworkVersion", "PlatformToolSet", "EnableManagedIncrementalBuild", "VCToolArchitecture", "WindowsTargetPlatformVersion" };
+            string line = "#";
+            foreach (var name in properties)
+                line += name + "=" + Proj.GetProperty(name).EvaluatedValue + ":";
+            if (line.EndsWith(":"))
+                line = line.Substring(0, line.Length - 1);
+            string projectName = Proj.GetProperty("ProjectName").EvaluatedValue;
+            string tlogPath = Proj.GetProperty("IntDir").EvaluatedValue + projectName + ".tlog";
+            BatchFileText += string.Format("\n\n@if not exist {0} mkdir {0}\n@echo {1}>{2}\n@echo on>>{2}\n@echo {3}^|{4}^|{5}^|>>{2}",
+                tlogPath, line, Path.Combine(tlogPath, projectName + ".lastbuildstate"),
+                CommandLineOptions.Config, CommandLineOptions.Platform, Path.GetDirectoryName(CommandLineOptions.Solution) + "\\");
+#if NULL_FASTBUILD_OUTPUT
 			BatchFileText += " > nul";
-		#endif
+#endif
+            File.WriteAllText(projectDir + "fb.bat", BatchFileText);
 
-			File.WriteAllText(projectDir + "fb.bat", BatchFileText);
+	        Process fbProcess = new Process
+	        {
+		        StartInfo =
+		        {
+			        FileName = projectDir + "fb.bat",
+			        Arguments = "-config \"" + BFFOutputFilePath + "\" " + CommandLineOptions.FBArgs,
+			        RedirectStandardOutput = true,
+			        UseShellExecute = false,
+			        WorkingDirectory = projectDir,
+			        StandardOutputEncoding = Console.OutputEncoding
+		        }
+	        };
 
-			Console.WriteLine("Building " + Path.GetFileNameWithoutExtension(ProjectPath));
+	        return fbProcess;
+        }
 
-			try
-			{
-				System.Diagnostics.Process FBProcess = new System.Diagnostics.Process();
-				FBProcess.StartInfo.FileName = projectDir + "fb.bat";
-				FBProcess.StartInfo.Arguments = "-config \"" + BFFOutputFilePath + "\" " + CommandLineOptions.FBArgs;
-				FBProcess.StartInfo.RedirectStandardOutput = true;
-				FBProcess.StartInfo.UseShellExecute = false;
-				FBProcess.StartInfo.WorkingDirectory = projectDir;
-				FBProcess.StartInfo.StandardOutputEncoding = Console.OutputEncoding;
+        public static bool ExecuteBffFile(string ProjectPath, string Platform)
+        {
+            string projectDir = Path.GetDirectoryName(ProjectPath) + "\\";
 
-				FBProcess.Start();
-				while (!FBProcess.StandardOutput.EndOfStream)
-				{
-				    Console.Write(FBProcess.StandardOutput.ReadLine() + "\n");
-				}
-				FBProcess.WaitForExit();
-				return FBProcess.ExitCode == 0;
-			}
-			catch (Exception e)
-			{
-				Console.WriteLine("Failed to launch FASTBuild!");
-				Console.WriteLine("Exception: " + e.Message);
-				return false;
-			}
-		}
+            string BatchFileText = "@echo off\n"
+                + (CommandLineOptions.Brokerage.Length > 0 ? "set FASTBUILD_BROKERAGE_PATH=" + CommandLineOptions.Brokerage + "\n" : "")
+                + "%comspec% /c \"\"" + VCBasePath + "Auxiliary\\Build\\vcvarsall.bat\" "
+                + (Platform == "Win32" ? "x86" : "x64") + " " + WindowsSDKTarget
+                + " && \"" + CommandLineOptions.FBExePath + "\" %*\"";
 
-		public class ObjectListNode
+            var Proj = CurrentProject.Proj;
+            List<string> properties = new List<string>() { "TargetFrameworkVersion", "PlatformToolSet", "EnableManagedIncrementalBuild", "VCToolArchitecture", "WindowsTargetPlatformVersion" };
+            string line = "#";
+            foreach (var name in properties)
+                line += name + "=" + Proj.GetProperty(name).EvaluatedValue + ":";
+            if (line.EndsWith(":"))
+                line = line.Substring(0, line.Length - 1);
+            string projectName = Proj.GetProperty("ProjectName").EvaluatedValue;
+            string tlogPath = Proj.GetProperty("IntDir").EvaluatedValue + projectName + ".tlog";
+            BatchFileText += string.Format("\n\n@if not exist {0} mkdir {0}\n@echo {1}>{2}\n@echo on>>{2}\n@echo {3}^|{4}^|{5}^|>>{2}",
+                tlogPath, line, Path.Combine(tlogPath, projectName + ".lastbuildstate"),
+                CommandLineOptions.Config, CommandLineOptions.Platform, Path.GetDirectoryName(CommandLineOptions.Solution) + "\\");
+
+#if NULL_FASTBUILD_OUTPUT
+			BatchFileText += " > nul";
+#endif
+
+            File.WriteAllText(projectDir + "fb.bat", BatchFileText);
+
+            Console.WriteLine("Building " + Path.GetFileNameWithoutExtension(ProjectPath));
+
+            try
+            {
+                System.Diagnostics.Process FBProcess = new System.Diagnostics.Process();
+                FBProcess.StartInfo.FileName = projectDir + "fb.bat";
+                FBProcess.StartInfo.Arguments = "-config \"" + BFFOutputFilePath + "\" " + CommandLineOptions.FBArgs;
+                FBProcess.StartInfo.RedirectStandardOutput = true;
+                FBProcess.StartInfo.UseShellExecute = false;
+                FBProcess.StartInfo.WorkingDirectory = projectDir;
+                FBProcess.StartInfo.StandardOutputEncoding = Console.OutputEncoding;
+
+                FBProcess.Start();
+                while (!FBProcess.StandardOutput.EndOfStream)
+                {
+                    Console.Write(FBProcess.StandardOutput.ReadLine() + "\n");
+                }
+                FBProcess.WaitForExit();
+                return FBProcess.ExitCode == 0;
+            }
+            catch (Exception e)
+            {
+                Console.WriteLine("Failed to launch FASTBuild!");
+                Console.WriteLine("Exception: " + e.Message);
+                return false;
+            }
+        }
+
+        public class ObjectListNode
 		{
 			string Compiler;
 			string CompilerOutputPath;
