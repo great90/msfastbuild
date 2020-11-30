@@ -216,16 +216,16 @@ namespace msfastbuildvsix
 			{
 				fbCommandLine += " -b " + fbPackage.OptionBrokerage;
 			}
-	        if (fbPackage.OptionFBUnity)
-	        {
-		        fbCommandLine += " -u true";
-	        }
-	        if (fbPackage.OptionMaxProcess > 0)
-	        {
-		        fbCommandLine += " -m " + fbPackage.OptionMaxProcess;
-	        }
+			if (fbPackage.OptionFBUnity)
+			{
+				fbCommandLine += " -u true";
+			}
+			if (fbPackage.OptionMaxProcess > 0)
+			{
+				fbCommandLine += " -m " + fbPackage.OptionMaxProcess;
+            }
 
-			string msfastbuildPath = Assembly.GetAssembly(typeof(msfastbuild.msfastbuild)).Location;
+            string msfastbuildPath = Assembly.GetAssembly(typeof(msfastbuild.msfastbuild)).Location;
 			try
 			{
 				fbPackage.m_outputPane.OutputString("Launching msfastbuild with command line: " + fbCommandLine + "\r");
